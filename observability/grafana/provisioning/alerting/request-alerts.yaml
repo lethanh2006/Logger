@@ -1,0 +1,223 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Backend request alerts
+    folder: Backend observability
+    interval: 1m
+    rules:
+      - uid: backend-http-5xx
+        title: Elevated backend 5xx errors
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: 'sum by (service) (count_over_time({service=~"gateway|auth|user|canteen|todo", event="http_request_completed"} | json | statusCode >= 500 [5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 5
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              refId: C
+              type: threshold
+        dashboardUid: backend-request-lifecycle
+        panelId: 2
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          description: More than five HTTP 5xx responses were logged in five minutes for a backend service.
+          summary: Elevated backend 5xx error rate
+        labels:
+          severity: critical
+          team: backend
+        isPaused: false
+
+      - uid: backend-health-failures
+        title: Backend health check failures
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: 'sum by (service) (count_over_time({service=~"gateway|auth|user|canteen|todo", event="http_request_completed"} | json | path=~"/health(/ready)?" | statusCode >= 400 [5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              refId: C
+              type: threshold
+        dashboardUid: backend-request-lifecycle
+        panelId: 2
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          description: A backend health or readiness endpoint returned an error status in the last five minutes.
+          summary: Backend health check is failing
+        labels:
+          severity: critical
+          team: backend
+        isPaused: false
+
+      - uid: backend-http-latency-p95
+        title: High backend HTTP p95 latency
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: 'quantile_over_time(0.95, {service=~"gateway|auth|user|canteen|todo", event="http_request_completed"} | json | unwrap durationMs [5m]) by (service)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1000
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              refId: C
+              type: threshold
+        dashboardUid: backend-request-lifecycle
+        panelId: 1
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          description: Backend HTTP p95 latency remained above one second for five minutes.
+          summary: High backend request latency
+        labels:
+          severity: warning
+          team: backend
+        isPaused: false

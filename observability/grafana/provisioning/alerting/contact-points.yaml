@@ -1,0 +1,12 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: backend-discord
+    receivers:
+      - uid: backend-discord
+        type: discord
+        disableResolveMessage: false
+        settings:
+          url: $GRAFANA_ALERT_WEBHOOK_URL
+          use_discord_username: false
