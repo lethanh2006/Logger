@@ -36,10 +36,31 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  grafana:
+    image: grafana/grafana:13.2.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - loki
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
 networks:
   observability:
     driver: bridge
 
 volumes:
   alloy_data:
+  grafana_data:
   loki_data:
