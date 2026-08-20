@@ -39,9 +39,9 @@ loki.source.docker "backend" {
 loki.process "backend" {
   stage.docker {}
 
-  // NestJS thêm prefix trước JSON; Express ghi thẳng JSON. Regex này hỗ trợ cả hai.
+  // NestJS thêm prefix và mã màu ANSI quanh JSON; Express ghi thẳng JSON.
   stage.regex {
-    expression = `(?P<payload>\{.*\})$`
+    expression = `(?P<payload>\{.*\})`
   }
 
   stage.json {
