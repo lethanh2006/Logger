@@ -136,3 +136,20 @@ test("default destinations keep informational events on stdout and errors on std
   assert.match(result.stderr, /stderr-only/);
   assert.doesNotMatch(result.stderr, /stdout-only/);
 });
+
+test("test environment defaults to JSON without a pretty destination", () => {
+  const packageRoot = path.resolve(__dirname, "..");
+  const source = `
+    const { createAppLogger } = require(${JSON.stringify(packageRoot)});
+    createAppLogger({ serviceName: "test-default" }).info("json-in-test");
+  `;
+  const result = spawnSync(process.execPath, ["-e", source], {
+    encoding: "utf8",
+    env: { ...process.env, NODE_ENV: "test", LOG_FORMAT: "" },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const event = JSON.parse(result.stdout.trim());
+  assert.equal(event.message, "json-in-test");
+  assert.equal(event["service.name"], "test-default");
+});

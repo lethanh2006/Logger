@@ -42,8 +42,8 @@ runWithLogContext({ request_id: "req-123" }, () => {
 });
 ```
 
-- `LOG_FORMAT=pretty` cho terminal development; production dùng
-  `LOG_FORMAT=json`.
+- `LOG_FORMAT=pretty` cho terminal development; production và test mặc định
+  dùng `LOG_FORMAT=json` để không tạo nhiều pretty-stream listener trong Jest.
 - `LOG_LEVEL` điều khiển level.
 - `trace` đến `warn` đi ra `stdout`; `error` và `fatal` đi ra `stderr`. Khi test
   có thể truyền một `destination` riêng để thu toàn bộ event.

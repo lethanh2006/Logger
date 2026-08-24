@@ -65,7 +65,9 @@ function resolveLogFormat(format) {
   if (normalized === "json" || normalized === "pretty") {
     return normalized;
   }
-  return process.env.NODE_ENV === "production" ? "json" : "pretty";
+  return ["production", "test"].includes(process.env.NODE_ENV)
+    ? "json"
+    : "pretty";
 }
 
 function isoTimestamp() {
