@@ -210,8 +210,11 @@ Compose. Có thể sinh secret local bằng `openssl rand -hex 32`.
 
 Hai Compose project phải có tên khác nhau. Wrapper
 `scripts/observability-compose.mjs` luôn truyền project name observability riêng
-và từ chối chạy nếu tên đó trùng `COMPOSE_PROJECT_NAME`; vì vậy
-`observability:down` không xóa nhầm container backend.
+và từ chối chạy nếu tên đó trùng `COMPOSE_PROJECT_NAME`. Wrapper cũng chặn
+`--remove-orphans`, vì các dependency backend dùng chung network observability,
+và tự dùng `ps --orphans=false` để không hiển thị nhầm chúng như container của
+stack observability. Vì vậy chỉ vận hành stack này qua wrapper; không thêm cờ
+`--remove-orphans` vào lệnh Compose thủ công.
 
 Các biến `*_HOST_PORT` và `GATEWAY_BIND_IP` trong `.env.example` là tùy chọn để
 đổi port/bind address. Mặc định chỉ Gateway bind `0.0.0.0`; UI, database và
@@ -225,6 +228,11 @@ message broker chỉ bind `127.0.0.1`.
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=<mat-khau-admin-manh>
 ```
+
+Wrapper kiểm tra trước `GRAFANA_ADMIN_PASSWORD` cùng ba biến
+`PAYMENT_POSTGRES_USER`, `PAYMENT_POSTGRES_PASSWORD`, `PAYMENT_POSTGRES_DB`.
+Nếu thiếu, wrapper dừng trước khi gọi Docker Compose để không fallback sang
+project backend.
 
 `GRAFANA_ADMIN_PASSWORD` không được để trống. Với volume Grafana đã khởi tạo,
 đổi biến môi trường không tự đổi mật khẩu cũ trong database Grafana.
