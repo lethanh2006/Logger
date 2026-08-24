@@ -6,6 +6,7 @@ const httpBoundaryHelpers = require("./http-boundary");
 const loggerHelpers = require("./logger");
 const messageContextHelpers = require("./message-context");
 const metricHelpers = require("./metrics");
+const requestIdHelpers = require("./request-id");
 const sanitizerHelpers = require("./sanitizer");
 const telemetryHelpers = require("./telemetry");
 
@@ -20,6 +21,7 @@ module.exports = {
   ...loggerHelpers,
   ...messageContextHelpers,
   ...metricHelpers,
+  ...requestIdHelpers,
   ...sanitizerHelpers,
   ...telemetryHelpers,
   getTelemetryState(...args) {
@@ -30,6 +32,15 @@ module.exports = {
   },
   shutdownTelemetry(...args) {
     return sdkCall("shutdownTelemetry", args);
+  },
+  async flushLoggerAndShutdownTelemetry(logger, timeoutMs = 3_000) {
+    try {
+      if (logger && typeof logger.flush === "function") {
+        await Promise.resolve(logger.flush());
+      }
+    } finally {
+      return sdkCall("shutdownTelemetry", [timeoutMs]);
+    }
   },
   startTelemetry(...args) {
     return sdkCall("startTelemetry", args);

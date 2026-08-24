@@ -99,6 +99,21 @@ export declare function runWithLogContext<TArgs extends unknown[], TResult>(
   ...args: TArgs
 ): TResult;
 
+export declare const REQUEST_ID_HEADER: "x-request-id";
+export declare const CLIENT_REQUEST_ID_HEADER: "x-client-request-id";
+export declare const SAFE_REQUEST_ID: RegExp;
+export declare function isSafeRequestId(value: unknown): value is string;
+export declare function createRequestCorrelation(
+  incomingRequestId?: unknown,
+  options?: {
+    trustIncoming?: boolean;
+    generate?: () => string;
+  },
+): { requestId: string; clientRequestId?: string };
+export declare function requestIdFromLogContext(
+  fallback?: unknown,
+): string | undefined;
+
 export declare function injectTraceHeaders(
   headers?: Record<string, unknown>,
   activeContext?: Context,
@@ -203,3 +218,7 @@ export declare function startTelemetry(
 ): TelemetryState;
 export declare function getTelemetryState(): TelemetryState | undefined;
 export declare function shutdownTelemetry(timeoutMs?: number): Promise<boolean>;
+export declare function flushLoggerAndShutdownTelemetry(
+  logger?: { flush?: () => unknown },
+  timeoutMs?: number,
+): Promise<boolean>;
