@@ -50,11 +50,12 @@ Loki label để tránh cardinality cao. Label ổn định gồm `service`, `co
 
 ## Alert
 
-Grafana provision ba rule, đánh giá mỗi phút:
+Grafana provision bốn rule, đánh giá mỗi phút:
 
 - Hơn 5 phản hồi HTTP 5xx trong 5 phút, kéo dài 5 phút.
 - Có health/readiness request trả status từ 400 trở lên, kéo dài 1 phút.
 - HTTP p95 latency lớn hơn 1.000 ms, kéo dài 5 phút.
+- Không có log từ bất kỳ backend service nào trong 5 phút, kéo dài 2 phút.
 
 Notification được group theo `alertname` và `service`, chờ 30 giây trước lần gửi
 đầu, group lại sau 5 phút và nhắc lại tối đa mỗi 2 giờ. Sau khi cấu hình webhook,
