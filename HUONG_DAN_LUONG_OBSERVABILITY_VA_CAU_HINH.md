@@ -172,8 +172,9 @@ for service in gateway auth user mail chat todo workschedule canteen payment; do
 done
 ```
 
-Sau đó mở các file vừa tạo và thay toàn bộ giá trị `CHANGE_ME`/`replace_with`.
-Không commit `.env` hoặc secret thật.
+Sau đó mở các file vừa tạo, điền mọi credential/secret đang rỗng và thay toàn bộ
+placeholder như `CHANGE_ME`, `replace_with`, `replace-with-*`, `your-*` hoặc
+giá trị mẫu tương tự. Không commit `.env` hoặc secret thật.
 
 ### Biến root bắt buộc
 
@@ -201,15 +202,16 @@ WORKSCHEDULE_INTERNAL_SECRET=<toi-thieu-32-ky-tu>
 
 OTEL_TRACES_SAMPLER_ARG=1
 OTEL_METRIC_EXPORT_INTERVAL=15000
+OTEL_METRIC_EXPORT_TIMEOUT=10000
 ```
 
 Giữ cùng giá trị `OBSERVABILITY_NETWORK_NAME` cho cả backend và observability
 Compose. Có thể sinh secret local bằng `openssl rand -hex 32`.
 
 Hai Compose project phải có tên khác nhau. Wrapper
-`scripts/observability-compose.mjs` luôn truyền project name observability riêng,
-vì vậy `observability:down` không thể xóa nhầm container backend ngay cả khi
-`COMPOSE_PROJECT_NAME=nrapp-backend` còn trong root `.env`.
+`scripts/observability-compose.mjs` luôn truyền project name observability riêng
+và từ chối chạy nếu tên đó trùng `COMPOSE_PROJECT_NAME`; vì vậy
+`observability:down` không xóa nhầm container backend.
 
 Các biến `*_HOST_PORT` và `GATEWAY_BIND_IP` trong `.env.example` là tùy chọn để
 đổi port/bind address. Mặc định chỉ Gateway bind `0.0.0.0`; UI, database và
@@ -244,8 +246,13 @@ OTEL_PROPAGATORS=tracecontext,baggage
 OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=<ty-le-tu-0-den-1>
 OTEL_METRIC_EXPORT_INTERVAL=15000
+OTEL_METRIC_EXPORT_TIMEOUT=10000
 OTEL_HTTP_IGNORE_INCOMING_PATHS=/health,/healthz,/ready,/readiness
 ```
+
+OpenTelemetry yêu cầu export timeout không lớn hơn interval. Shared SDK tự clamp
+timeout nếu cấu hình sai, nhưng production vẫn nên đặt hai giá trị rõ ràng và
+đo lại theo hạ tầng thực tế.
 
 App chạy trên host dùng `http://127.0.0.1:4318`; app chạy trong Docker network
 dùng `http://otel-collector:4318`. Không dùng `localhost` trong app container.
@@ -290,7 +297,9 @@ npm run observability:up
 ```
 
 Lệnh `observability:up` dùng đồng thời `backend/.env` và `logger/.env`, tạo
-network mặc định `nrapp-observability` rồi chờ container khởi động.
+network mặc định `nrapp-observability` rồi chờ container khởi động. `--wait` chỉ
+đảm bảo container đã chạy hoặc healthcheck đã khai báo đạt; một endpoint như
+Loki `/ready` vẫn có thể cần thêm vài giây trước khi trả `200`.
 
 ### Dựng observability cùng Redis/RabbitMQ/PostgreSQL
 
@@ -312,7 +321,8 @@ npm run dev
 
 1. dừng app container đang chạy để tránh trùng port;
 2. dựng observability và ba dependency;
-3. inject endpoint OTLP host `http://127.0.0.1:4318`;
+3. inject endpoint OTLP host `http://127.0.0.1:<OTEL_HTTP_HOST_PORT>` lấy từ
+   `logger/.env`, mặc định `4318`;
 4. chạy 9 service với `LOG_FORMAT=pretty` và prefix tên service.
 
 Nếu infra đã chạy và chỉ muốn chạy lại app:
@@ -375,6 +385,11 @@ Dashboard được provision vào folder `Infrastructure`:
 
 ## 9. Kiểm tra sau khi setup
 
+Baseline ngày 2026-08-24 đã được kiểm tra: shared package đạt `18/18` test,
+Docker build đủ `9/9` app image, một smoke span đi qua Collector và xuất hiện
+trong Jaeger, Prometheus báo `12/12` target `UP`. Mỗi môi trường mới vẫn phải
+chạy lại các bước dưới đây; kết quả này không thay cho production acceptance.
+
 ### Health và scrape target
 
 ```bash
@@ -384,6 +399,9 @@ curl -fsS http://127.0.0.1:12345/-/ready
 curl -fsS http://127.0.0.1:9090/-/ready
 curl -fsS http://127.0.0.1:3001/api/health
 ```
+
+Nếu vừa dựng stack và Loki tạm trả `503`, chờ vài giây rồi chạy lại; không coi
+một lần readiness chưa đạt trong lúc khởi động là lỗi business API.
 
 Mở <http://127.0.0.1:9090/targets>. Khi chạy `npm run infra:up`, các job dự
 kiến gồm Prometheus, node-exporter, cAdvisor, Redis, PostgreSQL, RabbitMQ,
@@ -419,7 +437,7 @@ Khi Gateway đang chạy, tạo một request test không chứa dữ liệu nh�
 
 ```bash
 curl -i -H 'x-request-id: obs-demo-001' \
-  http://127.0.0.1:3000/__observability-check
+  http://127.0.0.1:3000/
 ```
 
 Gateway sẽ tạo canonical `x-request-id` mới trong response; ID client trên chỉ
@@ -533,7 +551,9 @@ OTEL_TRACES_SAMPLER_ARG=1
 CPU/RAM và dung lượng storage rồi chọn tỷ lệ `0..1`; không sao chép mặc định `1`
 một cách máy móc. Head sampling hiện tại có thể bỏ mất trace lỗi. Nếu yêu cầu
 luôn giữ error/slow trace, bổ sung tail sampling tại Collector sau khi sizing
-memory/queue; không tự viết sampling trong từng service.
+memory/queue. Image Collector core đang dùng hiện không đóng gói processor
+`tail_sampling`; khi triển khai phải chuyển sang distribution/custom build có
+component này rồi mới thêm YAML. Không tự viết sampling trong từng service.
 
 Không dùng `request_id`, `trace_id`, `errorId`, user ID, email hoặc raw URL làm
 Prometheus label vì cardinality cao.
