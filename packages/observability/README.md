@@ -115,8 +115,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_TRACES_SAMPLER=parentbased_always_on
 OTEL_METRIC_EXPORT_INTERVAL=60000
+OTEL_METRIC_EXPORT_TIMEOUT=30000
 OTEL_HTTP_IGNORE_INCOMING_PATHS=/health,/healthz,/ready,/readiness
 ```
+
+Nếu timeout metric lớn hơn interval, package tự clamp timeout bằng interval để
+cấu hình metric không làm hỏng cả SDK trace.
 
 Local/staging có thể dùng `parentbased_always_on`; production phải chốt sampler
 theo traffic. `OTEL_SDK_DISABLED=true` tắt SDK. Lỗi khởi động/export telemetry

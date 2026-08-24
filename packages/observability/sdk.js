@@ -155,10 +155,22 @@ function createMetricReaders(options) {
       options.metricExportIntervalMillis ||
       60_000,
   );
-  const timeout = Number(
+  const configuredTimeout = Number(
     process.env.OTEL_METRIC_EXPORT_TIMEOUT ||
       options.metricExportTimeoutMillis ||
       30_000,
+  );
+  const exportIntervalMillis =
+    Number.isFinite(interval) && interval > 0 ? interval : 60_000;
+  const requestedTimeoutMillis =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : 30_000;
+  // OTel requires export timeout <= export interval. Clamp instead of letting
+  // one bad/default combination disable the entire SDK (including traces).
+  const exportTimeoutMillis = Math.min(
+    requestedTimeoutMillis,
+    exportIntervalMillis,
   );
 
   return [
@@ -166,10 +178,8 @@ function createMetricReaders(options) {
       exporter:
         options.metricExporter ||
         new OTLPMetricExporter(options.metricExporterOptions || {}),
-      exportIntervalMillis:
-        Number.isFinite(interval) && interval > 0 ? interval : 60_000,
-      exportTimeoutMillis:
-        Number.isFinite(timeout) && timeout > 0 ? timeout : 30_000,
+      exportIntervalMillis,
+      exportTimeoutMillis,
     }),
   ];
 }
