@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const { Writable } = require("node:stream");
 const { test } = require("node:test");
 const { PinoNestLogger, createAppLogger, runWithLogContext } = require("..");
@@ -113,4 +115,24 @@ test("Nest adapter maps context and severity to Pino", () => {
   assert.equal(event["nest.context"], "Mailer");
   assert.equal(event["event.name"], "nest.warn");
   assert.equal(event.message, "Delivery delayed");
+});
+
+test("default destinations keep informational events on stdout and errors on stderr", () => {
+  const packageRoot = path.resolve(__dirname, "..");
+  const source = `
+    const { createAppLogger } = require(${JSON.stringify(packageRoot)});
+    const logger = createAppLogger({ serviceName: "split-test", format: "json" });
+    logger.info({ "event.name": "stdout.event" }, "stdout-only");
+    logger.error({ "event.name": "stderr.event" }, "stderr-only");
+    logger.flush();
+  `;
+  const result = spawnSync(process.execPath, ["-e", source], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /stdout-only/);
+  assert.doesNotMatch(result.stdout, /stderr-only/);
+  assert.match(result.stderr, /stderr-only/);
+  assert.doesNotMatch(result.stderr, /stdout-only/);
 });

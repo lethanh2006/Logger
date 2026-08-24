@@ -100,6 +100,25 @@ function createPrettyDestination(options, destination) {
   });
 }
 
+function createSplitDestination(format, options) {
+  const stdoutDestination =
+    format === "pretty"
+      ? createPrettyDestination(options, process.stdout)
+      : process.stdout;
+  const stderrDestination =
+    format === "pretty"
+      ? createPrettyDestination(options, process.stderr)
+      : process.stderr;
+
+  return pino.multistream(
+    [
+      { level: "trace", stream: stdoutDestination },
+      { level: "error", stream: stderrDestination },
+    ],
+    { dedupe: true },
+  );
+}
+
 function createAppLogger(options = {}) {
   const serviceName =
     options.serviceName ||
@@ -154,16 +173,18 @@ function createAppLogger(options = {}) {
     },
   };
 
-  if (format === "pretty") {
+  if (options.destination && format === "pretty") {
     return pino(
       loggerOptions,
       createPrettyDestination(options, options.destination),
     );
   }
 
-  return options.destination
-    ? pino(loggerOptions, options.destination)
-    : pino(loggerOptions);
+  if (options.destination) {
+    return pino(loggerOptions, options.destination);
+  }
+
+  return pino(loggerOptions, createSplitDestination(format, options));
 }
 
 function normalizeNestMessage(message) {

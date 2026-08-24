@@ -105,6 +105,9 @@ function defaultInstrumentationConfig() {
   return {
     "@opentelemetry/instrumentation-fs": { enabled: false },
     "@opentelemetry/instrumentation-pino": { enabled: false },
+    // RabbitMQ spans and W3C propagation are owned by the explicit publisher /
+    // consumer boundaries so a message never creates two overlapping spans.
+    "@opentelemetry/instrumentation-amqplib": { enabled: false },
     "@opentelemetry/instrumentation-http": {
       ignoreIncomingRequestHook(request) {
         return ignored.has(requestPath(request));
