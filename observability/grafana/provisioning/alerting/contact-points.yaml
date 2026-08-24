@@ -1,12 +1,7 @@
 apiVersion: 1
 
-contactPoints:
+# The old mandatory Discord integration is intentionally removed. Configure a
+# production contact point only after the team has selected its alert channel.
+deleteContactPoints:
   - orgId: 1
-    name: backend-discord
-    receivers:
-      - uid: backend-discord
-        type: discord
-        disableResolveMessage: false
-        settings:
-          url: $GRAFANA_ALERT_WEBHOOK_URL
-          use_discord_username: false
+    uid: backend-discord

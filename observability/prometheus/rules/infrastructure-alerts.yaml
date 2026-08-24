@@ -1,0 +1,82 @@
+groups:
+  - name: infrastructure
+    rules:
+      - alert: ObservabilityTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+          description: "Prometheus could not scrape {{ $labels.instance }} for at least two minutes."
+
+      - alert: HostCpuHigh
+        expr: 100 * (1 - avg without (cpu) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: Host CPU usage is above 90%
+          description: "CPU usage on {{ $labels.instance }} has remained high for ten minutes."
+
+      - alert: HostMemoryHigh
+        expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: Host memory usage is above 90%
+          description: "Available memory on {{ $labels.instance }} has remained below 10% for ten minutes."
+
+      - alert: HostFilesystemLow
+        expr: 100 * node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint!~"/host/root/(dev|proc|sys)($|/.*)"} / node_filesystem_size_bytes < 10
+        for: 15m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: Host filesystem has less than 10% free space
+          description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is almost full."
+
+      - alert: OtelCollectorDroppedSpans
+        expr: increase(otelcol_receiver_refused_spans[5m]) > 0 or increase(otelcol_exporter_send_failed_spans[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: OpenTelemetry Collector is dropping spans
+          description: The collector refused spans or failed to export them during the last five minutes.
+
+      - alert: RabbitMqQueueBacklog
+        expr: sum by (queue) (rabbitmq_queue_messages_ready) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "RabbitMQ queue {{ $labels.queue }} is backing up"
+          description: "More than 1,000 messages have remained ready for ten minutes."
+
+      - alert: PostgreSqlConnectionsHigh
+        expr: sum(pg_stat_activity_count) / scalar(max(pg_settings_max_connections)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: PostgreSQL connection usage is above 85%
+          description: PostgreSQL connection usage has remained near saturation for ten minutes.
+
+      - alert: RedisMemoryHigh
+        expr: redis_memory_max_bytes > 0 and redis_memory_used_bytes / redis_memory_max_bytes * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: Redis memory usage is above 85%
+          description: Redis memory usage has remained high for ten minutes.

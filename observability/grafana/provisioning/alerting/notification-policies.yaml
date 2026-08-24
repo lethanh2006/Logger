@@ -1,11 +1,6 @@
 apiVersion: 1
 
-policies:
-  - orgId: 1
-    receiver: backend-discord
-    group_by:
-      - alertname
-      - service
-    group_wait: 30s
-    group_interval: 5m
-    repeat_interval: 2h
+# Return Grafana to its editable default policy instead of binding local setup
+# to a third-party webhook.
+resetPolicies:
+  - 1

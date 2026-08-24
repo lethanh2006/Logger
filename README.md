@@ -1,14 +1,28 @@
 # Backend observability
 
-Stack này thu thập stdout/stderr dạng JSON của `gateway`, `auth`, `user`,
-`canteen`, `todo`, `chat`, `workschedule`, `payment` và `mail`, lưu vào Loki,
-rồi cung cấp dashboard và alert qua Grafana. Alloy tìm container theo Docker
-Compose service label nên có thể chạy song song với file `compose.yaml` ở thư
-mục backend cha mà không cần sửa compose của từng service.
+Stack này tách tín hiệu theo đúng mục đích:
 
-Ứng dụng Express cũ trong `src/index.js` và endpoint `/api/log` vẫn được giữ để
-tương thích. Luồng observability mới không yêu cầu các service phải POST log tới
-endpoint đó.
+- ứng dụng gửi trace/metric bằng OTLP tới OpenTelemetry Collector;
+- Collector batch/retry trace sang Jaeger và expose OTLP metric để Prometheus
+  scrape;
+- Prometheus scrape host, container và các thành phần observability;
+- Grafana dùng Prometheus mặc định cho hạ tầng và Jaeger cho distributed trace;
+- Alloy chỉ chuyển log hệ thống/hạ tầng sang Loki, không dùng Loki để tính API
+  latency hoặc làm error center.
+
+Ứng dụng Express cũ trong `src/index.js` vẫn được giữ trong repository để có
+rollback window, nhưng không tham gia luồng observability và service không được
+POST log đồng bộ tới `/api/log`.
+
+## Phạm vi môi trường
+
+Jaeger trong Compose dùng all-in-one memory storage. Cấu hình này phù hợp local
+và staging ngắn hạn; restart container sẽ mất trace. Production phải dùng
+persistent storage, retention, authentication/TLS và sizing riêng.
+
+`node-exporter` và cAdvisor đọc host Linux/Docker hiện tại. cAdvisor cần quyền
+`privileged` cùng các read-only host mounts để đọc đủ cgroup/container metrics;
+không chạy stack này trên Docker host không tin cậy.
 
 ## Khởi động
 
@@ -18,68 +32,104 @@ Từ thư mục `logger`:
 cp .env.example .env
 ```
 
-Đổi `GRAFANA_ADMIN_PASSWORD` thành mật khẩu mạnh và điền Discord webhook thật
-vào `GRAFANA_ALERT_WEBHOOK_URL`, sau đó chạy:
+Đổi `GRAFANA_ADMIN_PASSWORD` thành mật khẩu mạnh, sau đó:
 
 ```bash
-docker compose up -d
-docker compose ps
+docker compose --env-file ../.env --env-file .env config --quiet
+docker compose --env-file ../.env --env-file .env up -d
+docker compose --env-file ../.env --env-file .env ps
 ```
 
-Các cổng mặc định chỉ bind vào loopback:
+Các cổng mặc định chỉ bind loopback:
 
 - Grafana: <http://127.0.0.1:3001>
+- Jaeger UI: <http://127.0.0.1:16686>
+- Prometheus: <http://127.0.0.1:9090>
+- Collector OTLP gRPC: `127.0.0.1:4317`
+- Collector OTLP HTTP: `http://127.0.0.1:4318`
+- Collector health: <http://127.0.0.1:13133>
 - Loki readiness: <http://127.0.0.1:3100/ready>
 - Alloy readiness: <http://127.0.0.1:12345/-/ready>
 
-Dashboard `Backend observability / Backend request lifecycle` được provision tự
-động. Chọn service và nhập request ID vào biến `Request ID (regex)` để lần theo
-một request qua các service.
+Grafana tự provision ba datasource `Prometheus`, `Jaeger`, `Loki`; Prometheus là
+datasource mặc định. Dashboard `Infrastructure / Infrastructure overview` hiển
+thị host, container, scrape target và sức khỏe Collector.
 
-## Truy vấn nhanh
+## Nối backend vào Collector
 
-Trong Grafana Explore, có thể dùng:
+Compose tạo Docker network có tên cố định mặc định là `nrapp-observability`.
+Compose chạy các backend phải khai báo network external cùng tên và nối các app
+vào network đó. Trong container, cấu hình:
+
+```dotenv
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+```
+
+Không dùng `localhost` trong app container vì đó là loopback của chính app.
+Ứng dụng chạy trực tiếp trên host có thể dùng `http://127.0.0.1:4318`.
+
+Nếu đổi `OBSERVABILITY_NETWORK_NAME` trong `logger/.env`, Compose backend cũng
+phải dùng đúng tên đó.
+
+## Metrics và alert rule
+
+Prometheus scrape mỗi 15 giây:
+
+- Prometheus, node-exporter và cAdvisor;
+- Redis exporter, PostgreSQL exporter và RabbitMQ Prometheus plugin;
+- OpenTelemetry Collector self-metrics và OTLP application metrics;
+- Jaeger, Loki, Alloy và Grafana.
+
+Rule cơ bản nằm tại `observability/prometheus/rules` gồm target down, CPU/RAM,
+filesystem gần đầy, Collector drop/export-fail span, RabbitMQ backlog,
+PostgreSQL connection saturation và Redis memory. Rule được đánh giá trong
+Prometheus nhưng chưa có Alertmanager/contact point production; việc chọn nơi
+nhận notification là quyết định vận hành riêng.
+
+## Loki chỉ giữ system/infra log
+
+Alloy chỉ discover container observability cùng PostgreSQL, Redis và RabbitMQ.
+Log từ `gateway`, `auth`, `user`, `canteen`, `chat`, `todo`, `workschedule`,
+`payment`, `mail` không còn được gửi vào pipeline Loki này.
+
+Truy vấn system log trong Grafana Explore:
 
 ```logql
-{service=~"gateway|auth|user|canteen|todo|chat|workschedule|payment|mail"} | json | requestId="<request-id>"
+{log_scope="system"}
 ```
 
-`requestId` và `userId` được giữ dưới dạng structured metadata, không dùng làm
-Loki label để tránh cardinality cao. Label ổn định gồm `service`, `container` và
-`event`. Loki giữ dữ liệu bảy ngày theo cấu hình mặc định của repo này.
+Request latency xem trong Jaeger; lỗi ứng dụng vẫn nằm ở structured
+stdout/stderr và Docker local rotation theo policy của backend Compose.
 
-## Alert
-
-Grafana provision bốn rule, đánh giá mỗi phút:
-
-- Hơn 5 phản hồi HTTP 5xx trong 5 phút, kéo dài 5 phút.
-- Có health/readiness request trả status từ 400 trở lên, kéo dài 1 phút.
-- HTTP p95 latency lớn hơn 1.000 ms, kéo dài 5 phút.
-- Không có log từ bất kỳ backend service nào trong 5 phút, kéo dài 2 phút.
-
-Notification được group theo `alertname` và `service`, chờ 30 giây trước lần gửi
-đầu, group lại sau 5 phút và nhắc lại tối đa mỗi 2 giờ. Sau khi cấu hình webhook,
-dùng nút **Test** ở `Alerting > Contact points > backend-discord` để xác nhận
-Discord nhận được thông báo. Không commit file `.env` hoặc webhook thật.
-
-## Kiểm tra và xử lý sự cố
+## Kiểm tra nhanh
 
 ```bash
+curl -fsS http://127.0.0.1:13133/
 curl -fsS http://127.0.0.1:3100/ready
 curl -fsS http://127.0.0.1:12345/-/ready
+curl -fsS http://127.0.0.1:9090/-/ready
 curl -fsS http://127.0.0.1:3001/api/health
-docker compose logs --tail=100 loki alloy grafana
+docker compose logs --tail=100 otel-collector jaeger prometheus
 ```
 
-Nếu dashboard không có dữ liệu, xác nhận backend chạy bằng Docker Compose và
-tên service là một trong chín tên được liệt kê ở trên. Alloy cần mount read-only
-`/var/run/docker.sock`; quyền này cho phép đọc metadata và log của container nên
-chỉ nên chạy stack trên Docker host tin cậy.
+Mở <http://127.0.0.1:9090/targets> để xác nhận các target đều `UP`. Nếu app
+không có trace, kiểm tra app đã nối network `nrapp-observability`, endpoint OTLP
+dùng DNS `otel-collector`, và Collector không báo refused/export failed.
 
-Dừng container mà vẫn giữ dữ liệu:
+Dừng mà giữ volume:
 
 ```bash
-docker compose down
+docker compose --env-file ../.env --env-file .env down
 ```
 
-Chỉ thêm `--volumes` khi chủ động muốn xóa toàn bộ dữ liệu Loki/Grafana.
+Chỉ thêm `--volumes` khi chủ động muốn xóa dữ liệu Prometheus/Loki/Grafana.
+
+## Tài liệu chính thức
+
+- [OpenTelemetry Collector Docker](https://opentelemetry.io/docs/collector/install/docker/)
+- [OpenTelemetry Collector configuration](https://opentelemetry.io/docs/collector/configuration/)
+- [Jaeger v2 getting started](https://www.jaegertracing.io/docs/2.20/getting-started/)
+- [Prometheus node-exporter guide](https://prometheus.io/docs/guides/node-exporter/)
+- [Prometheus cAdvisor guide](https://prometheus.io/docs/guides/cadvisor/)
+- [Grafana provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/)

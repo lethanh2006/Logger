@@ -1,6 +1,128 @@
 name: ${COMPOSE_PROJECT_NAME:-nrapp-observability}
 
 services:
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
+    restart: "no"
+    environment:
+      JAEGER_LISTEN_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${JAEGER_UI_HOST_PORT:-16686}:16686"
+    expose:
+      - "4317"
+      - "4318"
+      - "8888"
+      - "13133"
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.159.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    restart: "no"
+    ports:
+      - "127.0.0.1:${OTEL_GRPC_HOST_PORT:-4317}:4317"
+      - "127.0.0.1:${OTEL_HTTP_HOST_PORT:-4318}:4318"
+      - "127.0.0.1:${OTEL_HEALTH_HOST_PORT:-13133}:13133"
+    expose:
+      - "8888"
+      - "8889"
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - jaeger
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  prometheus:
+    image: prom/prometheus:v3.12.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+    restart: "no"
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - otel-collector
+      - node-exporter
+      - cadvisor
+      - redis-exporter
+      - postgres-exporter
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  node-exporter:
+    image: prom/node-exporter:v1.11.1
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/storage/.+)(/.*)?
+    restart: "no"
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+    expose:
+      - "9100"
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.57.0
+    restart: "no"
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    expose:
+      - "8080"
+    networks:
+      - observability
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.89.0-alpine
+    restart: "no"
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    expose:
+      - "9121"
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    restart: "no"
+    environment:
+      DATA_SOURCE_NAME: postgresql://${PAYMENT_POSTGRES_USER:?Set PAYMENT_POSTGRES_USER in backend/.env}:${PAYMENT_POSTGRES_PASSWORD:?Set PAYMENT_POSTGRES_PASSWORD in backend/.env}@payment-postgres:5432/${PAYMENT_POSTGRES_DB:?Set PAYMENT_POSTGRES_DB in backend/.env}?sslmode=disable
+    expose:
+      - "9187"
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+
   loki:
     image: grafana/loki:3.7.0
     command: ["-config.file=/etc/loki/config.yaml"]
@@ -44,7 +166,6 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
-      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:?Set GRAFANA_ALERT_WEBHOOK_URL in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
     volumes:
@@ -53,6 +174,8 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - loki
+      - prometheus
+      - jaeger
     networks:
       - observability
     security_opt:
@@ -60,9 +183,11 @@ services:
 
 networks:
   observability:
+    name: ${OBSERVABILITY_NETWORK_NAME:-nrapp-observability}
     driver: bridge
 
 volumes:
   alloy_data:
   grafana_data:
   loki_data:
+  prometheus_data:

@@ -1,96 +1,62 @@
 logging {
-  level  = "info"
-  format = "logfmt"
+	level  = "info"
+	format = "logfmt"
 }
 
-discovery.docker "backend" {
-  host             = "unix:///var/run/docker.sock"
-  refresh_interval = "5s"
+discovery.docker "system" {
+	host             = "unix:///var/run/docker.sock"
+	refresh_interval = "10s"
 }
 
-discovery.relabel "backend" {
-  targets = discovery.docker.backend.targets
+discovery.relabel "system" {
+	targets = discovery.docker.system.targets
 
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "(gateway|auth|user|canteen|todo|chat|workschedule|payment|mail)"
-    action        = "keep"
-  }
+	// Application access/error logs no longer belong to Loki. Keep only the
+	// observability stack and infrastructure dependencies in this pipeline.
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		regex         = "(alloy|cadvisor|grafana|jaeger|loki|node-exporter|otel-collector|payment-postgres|prometheus|rabbitmq|redis)"
+		action        = "keep"
+	}
 
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "service"
-  }
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
 
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/(.*)"
-    replacement   = "$1"
-    target_label  = "container"
-  }
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+		target_label  = "compose_project"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		replacement   = "$1"
+		target_label  = "container"
+	}
 }
 
-loki.source.docker "backend" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.relabel.backend.output
-  forward_to = [loki.process.backend.receiver]
+loki.source.docker "system" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.system.output
+	forward_to = [loki.process.system.receiver]
 }
 
-loki.process "backend" {
-  stage.docker {}
+loki.process "system" {
+	stage.docker { }
 
-  // NestJS thêm prefix và có thể thêm mã màu ANSI quanh payload JSON.
-  stage.regex {
-    expression = `(?P<payload>\{.*\})`
-  }
+	stage.static_labels {
+		values = {
+			log_scope = "system",
+		}
+	}
 
-  stage.json {
-    source = "payload"
-    expressions = {
-      timestamp   = "timestamp",
-      logged_svc  = "service",
-      event       = "event",
-      request_id  = "requestId",
-      user_id     = "userId",
-      method      = "method",
-      path        = "path",
-      status_code = "statusCode",
-      duration_ms = "durationMs",
-    }
-  }
-
-  stage.labels {
-    values = {
-      event = "event",
-    }
-  }
-
-  // Request/user IDs có cardinality cao nên lưu metadata thay vì Loki label.
-  stage.structured_metadata {
-    values = {
-      requestId  = "request_id",
-      userId     = "user_id",
-      method     = "method",
-      path       = "path",
-      statusCode = "status_code",
-      durationMs = "duration_ms",
-    }
-  }
-
-  stage.timestamp {
-    source = "timestamp"
-    format = "RFC3339Nano"
-  }
-
-  stage.output {
-    source = "payload"
-  }
-
-  forward_to = [loki.write.local.receiver]
+	forward_to = [loki.write.local.receiver]
 }
 
 loki.write "local" {
-  endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
-  }
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
 }
