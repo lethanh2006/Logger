@@ -1,10 +1,10 @@
 # Backend observability
 
 Stack này thu thập stdout/stderr dạng JSON của `gateway`, `auth`, `user`,
-`canteen` và `todo`, lưu vào Loki, rồi cung cấp dashboard và alert qua
-Grafana. Alloy tìm container theo Docker Compose service label nên có thể chạy
-song song với file `compose.yaml` ở thư mục backend cha mà không cần sửa compose
-của từng service.
+`canteen`, `todo`, `chat`, `workschedule`, `payment` và `mail`, lưu vào Loki,
+rồi cung cấp dashboard và alert qua Grafana. Alloy tìm container theo Docker
+Compose service label nên có thể chạy song song với file `compose.yaml` ở thư
+mục backend cha mà không cần sửa compose của từng service.
 
 Ứng dụng Express cũ trong `src/index.js` và endpoint `/api/log` vẫn được giữ để
 tương thích. Luồng observability mới không yêu cầu các service phải POST log tới
@@ -41,7 +41,7 @@ một request qua các service.
 Trong Grafana Explore, có thể dùng:
 
 ```logql
-{service=~"gateway|auth|user|canteen|todo"} | json | requestId="<request-id>"
+{service=~"gateway|auth|user|canteen|todo|chat|workschedule|payment|mail"} | json | requestId="<request-id>"
 ```
 
 `requestId` và `userId` được giữ dưới dạng structured metadata, không dùng làm
@@ -71,7 +71,7 @@ docker compose logs --tail=100 loki alloy grafana
 ```
 
 Nếu dashboard không có dữ liệu, xác nhận backend chạy bằng Docker Compose và
-tên service là một trong năm tên được liệt kê ở trên. Alloy cần mount read-only
+tên service là một trong chín tên được liệt kê ở trên. Alloy cần mount read-only
 `/var/run/docker.sock`; quyền này cho phép đọc metadata và log của container nên
 chỉ nên chạy stack trên Docker host tin cậy.
 

@@ -20,7 +20,7 @@ groups:
                 type: loki
                 uid: loki
               editorMode: code
-              expr: 'sum by (service) (count_over_time({service=~"gateway|auth|user|canteen|todo", event="http_request_completed"} | json | statusCode >= 500 [5m]))'
+              expr: 'sum by (service) (count_over_time({service=~"gateway|auth|user|canteen|todo|chat|workschedule|payment|mail", event=~"http_request_completed|http_request_failed"} | json | statusCode >= 500 [5m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -92,7 +92,7 @@ groups:
                 type: loki
                 uid: loki
               editorMode: code
-              expr: 'sum by (service) (count_over_time({service=~"gateway|auth|user|canteen|todo", event="http_request_completed"} | json | path=~"/health(/ready)?" | statusCode >= 400 [5m]))'
+              expr: 'sum by (service) (count_over_time({service=~"gateway|auth|user|canteen|todo|chat|workschedule|payment|mail", event=~"http_request_completed|http_request_rejected|http_request_failed"} | json | path=~"/health(/(live|ready))?" | statusCode >= 400 [5m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -164,7 +164,7 @@ groups:
                 type: loki
                 uid: loki
               editorMode: code
-              expr: 'quantile_over_time(0.95, {service=~"gateway|auth|user|canteen|todo", event="http_request_completed"} | json | unwrap durationMs [5m]) by (service)'
+              expr: 'quantile_over_time(0.95, {service=~"gateway|auth|user|canteen|todo|chat|workschedule|payment|mail", event="http_request_completed"} | json | unwrap durationMs [5m]) by (service)'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200

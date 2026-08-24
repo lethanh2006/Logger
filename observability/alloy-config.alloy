@@ -13,7 +13,7 @@ discovery.relabel "backend" {
 
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "(gateway|auth|user|canteen|todo)"
+    regex         = "(gateway|auth|user|canteen|todo|chat|workschedule|payment|mail)"
     action        = "keep"
   }
 
@@ -39,7 +39,7 @@ loki.source.docker "backend" {
 loki.process "backend" {
   stage.docker {}
 
-  // NestJS thêm prefix và mã màu ANSI quanh JSON; Express ghi thẳng JSON.
+  // NestJS thêm prefix và có thể thêm mã màu ANSI quanh payload JSON.
   stage.regex {
     expression = `(?P<payload>\{.*\})`
   }

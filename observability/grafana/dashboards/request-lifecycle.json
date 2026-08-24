@@ -191,7 +191,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (service) (count_over_time({service=~\"$service\", event=\"http_request_completed\"} | json | statusCode >= 400 and statusCode < 500 [$__auto]))",
+          "expr": "sum by (service) (count_over_time({service=~\"$service\", event=~\"http_request_completed|http_request_rejected\"} | json | statusCode >= 400 and statusCode < 500 [$__auto]))",
           "legendFormat": "4xx {{service}}",
           "queryType": "range",
           "refId": "A"
@@ -202,7 +202,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (service) (count_over_time({service=~\"$service\", event=\"http_request_completed\"} | json | statusCode >= 500 [$__auto]))",
+          "expr": "sum by (service) (count_over_time({service=~\"$service\", event=~\"http_request_completed|http_request_failed\"} | json | statusCode >= 500 [$__auto]))",
           "legendFormat": "5xx {{service}}",
           "queryType": "range",
           "refId": "B"
