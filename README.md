@@ -10,9 +10,9 @@ Stack này tách tín hiệu theo đúng mục đích:
 - Alloy chỉ chuyển log hệ thống/hạ tầng sang Loki, không dùng Loki để tính API
   latency hoặc làm error center.
 
-Ứng dụng Express cũ trong `src/index.js` vẫn được giữ trong repository để có
-rollback window, nhưng không tham gia luồng observability và service không được
-POST log đồng bộ tới `/api/log`.
+Logger Express cũ đã được gỡ. Backend không POST log đồng bộ tới `/api/log`;
+structured log đi thẳng ra `stdout`/`stderr`, còn telemetry được export bất đồng
+bộ qua OpenTelemetry.
 
 ## Phạm vi môi trường
 
