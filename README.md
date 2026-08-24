@@ -26,19 +26,22 @@ không chạy stack này trên Docker host không tin cậy.
 
 ## Khởi động
 
-Từ thư mục `logger`:
+Từ thư mục `backend`:
 
 ```bash
-cp .env.example .env
+test -f logger/.env || cp logger/.env.example logger/.env
 ```
 
 Đổi `GRAFANA_ADMIN_PASSWORD` thành mật khẩu mạnh, sau đó:
 
 ```bash
-docker compose --env-file ../.env --env-file .env config --quiet
-docker compose --env-file ../.env --env-file .env up -d
-docker compose --env-file ../.env --env-file .env ps
+npm run observability:config
+npm run observability:up
+node scripts/observability-compose.mjs ps
 ```
+
+Wrapper luôn dùng project riêng `nrapp-observability`, không dùng chung
+`COMPOSE_PROJECT_NAME` với backend nên lệnh `down` không chạm nhầm app/database.
 
 Các cổng mặc định chỉ bind loopback:
 
@@ -120,7 +123,7 @@ dùng DNS `otel-collector`, và Collector không báo refused/export failed.
 Dừng mà giữ volume:
 
 ```bash
-docker compose --env-file ../.env --env-file .env down
+npm run observability:down
 ```
 
 Chỉ thêm `--volumes` khi chủ động muốn xóa dữ liệu Prometheus/Loki/Grafana.

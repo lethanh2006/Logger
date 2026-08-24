@@ -182,6 +182,7 @@ báo:
 
 ```dotenv
 COMPOSE_PROJECT_NAME=nrapp-backend
+OBSERVABILITY_COMPOSE_PROJECT_NAME=nrapp-observability
 OBSERVABILITY_NETWORK_NAME=nrapp-observability
 
 RABBITMQ_USER=nrapp_dev
@@ -204,6 +205,11 @@ OTEL_METRIC_EXPORT_INTERVAL=15000
 
 Giữ cùng giá trị `OBSERVABILITY_NETWORK_NAME` cho cả backend và observability
 Compose. Có thể sinh secret local bằng `openssl rand -hex 32`.
+
+Hai Compose project phải có tên khác nhau. Wrapper
+`scripts/observability-compose.mjs` luôn truyền project name observability riêng,
+vì vậy `observability:down` không thể xóa nhầm container backend ngay cả khi
+`COMPOSE_PROJECT_NAME=nrapp-backend` còn trong root `.env`.
 
 Các biến `*_HOST_PORT` và `GATEWAY_BIND_IP` trong `.env.example` là tùy chọn để
 đổi port/bind address. Mặc định chỉ Gateway bind `0.0.0.0`; UI, database và
@@ -568,8 +574,8 @@ npm run observability:up
 5. xem log Collector/Jaeger:
 
 ```bash
-docker compose --env-file .env --env-file logger/.env \
-  -f logger/compose.yaml logs --tail=200 otel-collector jaeger
+node scripts/observability-compose.mjs \
+  logs --tail=200 otel-collector jaeger
 ```
 
 Telemetry bootstrap phải chạy trước khi Nest/HTTP/database driver được import.
@@ -582,8 +588,7 @@ Mở `/targets` để biết đúng job, sau đó kiểm tra:
 
 ```bash
 docker compose ps redis rabbitmq payment-postgres
-docker compose --env-file .env --env-file logger/.env \
-  -f logger/compose.yaml ps
+node scripts/observability-compose.mjs ps
 ```
 
 - RabbitMQ: xác nhận file `docker/rabbitmq-enabled-plugins` còn

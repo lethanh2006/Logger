@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-nrapp-observability}
+name: ${OBSERVABILITY_COMPOSE_PROJECT_NAME:-nrapp-observability}
 
 services:
   jaeger:
