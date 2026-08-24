@@ -650,6 +650,17 @@ Nếu volume `grafana_data` đã tồn tại, dùng Grafana CLI reset admin theo
 chính thức hoặc backup rồi tạo lại riêng volume Grafana. Không xóa tất cả volume
 chỉ để sửa mật khẩu.
 
+Sau khi đã điền `GRAFANA_ADMIN_PASSWORD` mới trong `logger/.env`, có thể reset
+volume hiện hữu mà không ghi mật khẩu vào shell history:
+
+```bash
+npm run observability:up
+read -rsp 'Mật khẩu Grafana mới: ' GRAFANA_NEW_PASSWORD; echo
+node scripts/observability-compose.mjs exec -T grafana \
+  grafana cli admin reset-admin-password "$GRAFANA_NEW_PASSWORD"
+unset GRAFANA_NEW_PASSWORD
+```
+
 ### `npm run dev` báo trùng port
 
 Script kiểm tra đủ 9 host port trước khi spawn app. Dừng process cũ hoặc đổi
