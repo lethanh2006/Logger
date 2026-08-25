@@ -1,9 +1,20 @@
 name: ${OBSERVABILITY_COMPOSE_PROJECT_NAME:-nrapp-observability}
 
+x-observability-defaults: &observability-defaults
+  restart: ${OBSERVABILITY_RESTART_POLICY:-unless-stopped}
+  stop_grace_period: ${OBSERVABILITY_STOP_GRACE_PERIOD:-15s}
+  cpus: ${OBSERVABILITY_CPU_LIMIT:-1.0}
+  mem_limit: ${OBSERVABILITY_MEMORY_LIMIT:-1g}
+  logging:
+    driver: local
+    options:
+      max-size: ${OBSERVABILITY_LOG_MAX_SIZE:-10m}
+      max-file: ${OBSERVABILITY_LOG_MAX_FILE:-3}
+
 services:
   jaeger:
+    <<: *observability-defaults
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
-    restart: "no"
     environment:
       JAEGER_LISTEN_HOST: 0.0.0.0
     ports:
@@ -17,11 +28,25 @@ services:
       - observability
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:13133/status",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   otel-collector:
+    <<: *observability-defaults
     image: otel/opentelemetry-collector:0.159.0
     command: ["--config=/etc/otelcol/config.yaml"]
-    restart: "no"
     ports:
       - "127.0.0.1:${OTEL_GRPC_HOST_PORT:-4317}:4317"
       - "127.0.0.1:${OTEL_HTTP_HOST_PORT:-4318}:4318"
@@ -39,12 +64,12 @@ services:
       - no-new-privileges:true
 
   prometheus:
+    <<: *observability-defaults
     image: prom/prometheus:v3.12.0
     command:
       - --config.file=/etc/prometheus/prometheus.yaml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
-    restart: "no"
     ports:
       - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
     volumes:
@@ -61,15 +86,29 @@ services:
       - observability
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:9090/-/ready",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   node-exporter:
+    <<: *observability-defaults
     image: prom/node-exporter:v1.11.1
     command:
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
       - --path.rootfs=/host/root
       - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/storage/.+)(/.*)?
-    restart: "no"
     pid: host
     volumes:
       - /proc:/host/proc:ro
@@ -81,10 +120,23 @@ services:
       - observability
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:9100/metrics",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   cadvisor:
+    <<: *observability-defaults
     image: ghcr.io/google/cadvisor:v0.57.0
-    restart: "no"
     privileged: true
     devices:
       - /dev/kmsg:/dev/kmsg
@@ -98,10 +150,24 @@ services:
       - "8080"
     networks:
       - observability
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/healthz",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   redis-exporter:
+    <<: *observability-defaults
     image: oliver006/redis_exporter:v1.89.0-alpine
-    restart: "no"
     environment:
       REDIS_ADDR: redis://redis:6379
     expose:
@@ -110,10 +176,16 @@ services:
       - observability
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test:
+        ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9121/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   postgres-exporter:
+    <<: *observability-defaults
     image: prometheuscommunity/postgres-exporter:v0.20.1
-    restart: "no"
     environment:
       DATA_SOURCE_NAME: postgresql://${PAYMENT_POSTGRES_USER:?Set PAYMENT_POSTGRES_USER in backend/.env}:${PAYMENT_POSTGRES_PASSWORD:?Set PAYMENT_POSTGRES_PASSWORD in backend/.env}@payment-postgres:5432/${PAYMENT_POSTGRES_DB:?Set PAYMENT_POSTGRES_DB in backend/.env}?sslmode=disable
     expose:
@@ -122,8 +194,14 @@ services:
       - observability
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9187/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   loki:
+    <<: *observability-defaults
     image: grafana/loki:3.7.0
     command: ["-config.file=/etc/loki/config.yaml"]
     restart: unless-stopped
@@ -138,6 +216,7 @@ services:
       - no-new-privileges:true
 
   alloy:
+    <<: *observability-defaults
     image: grafana/alloy:v1.18.0
     command:
       - run
@@ -157,8 +236,22 @@ services:
       - observability
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - /bin/bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/12345;
+          printf 'GET /-/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          grep -q '^HTTP/1\.[01] 200' <&3
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   grafana:
+    <<: *observability-defaults
     image: grafana/grafana:13.2.0
     restart: unless-stopped
     ports:
@@ -180,6 +273,20 @@ services:
       - observability
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:3000/api/health",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 networks:
   observability:

@@ -61,6 +61,26 @@ groups:
           summary: "RabbitMQ queue {{ $labels.queue }} is backing up"
           description: "More than 1,000 messages have remained ready for ten minutes."
 
+      - alert: PostgreSqlUnavailable
+        expr: pg_up == 0 or pg_exporter_last_scrape_error == 1
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: PostgreSQL is unavailable to its exporter
+          description: "The PostgreSQL exporter cannot collect database metrics from {{ $labels.instance }}."
+
+      - alert: RedisUnavailable
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: Redis is unavailable to its exporter
+          description: "The Redis exporter cannot collect database metrics from {{ $labels.instance }}."
+
       - alert: PostgreSqlConnectionsHigh
         expr: sum(pg_stat_activity_count) / scalar(max(pg_settings_max_connections)) * 100 > 85
         for: 10m
