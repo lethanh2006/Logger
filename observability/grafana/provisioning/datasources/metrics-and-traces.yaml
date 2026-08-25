@@ -5,6 +5,8 @@ deleteDatasources:
     orgId: 1
   - name: Jaeger
     orgId: 1
+  - name: Alertmanager
+    orgId: 1
 
 datasources:
   - name: Prometheus
@@ -30,3 +32,14 @@ datasources:
     jsonData:
       nodeGraph:
         enabled: true
+
+  - name: Alertmanager
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    isDefault: false
+    editable: false
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false

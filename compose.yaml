@@ -77,6 +77,7 @@ services:
       - ./observability/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     depends_on:
+      - alertmanager
       - otel-collector
       - node-exporter
       - cadvisor
@@ -95,6 +96,37 @@ services:
           "-O",
           "/dev/null",
           "http://127.0.0.1:9090/-/ready",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  alertmanager:
+    <<: *observability-defaults
+    image: prom/alertmanager:v0.34.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yaml
+      - --storage.path=/alertmanager
+      - --data.retention=${ALERTMANAGER_RETENTION:-120h}
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_HOST_PORT:-9093}:9093"
+    volumes:
+      - "${ALERTMANAGER_CONFIG_FILE:-./observability/alertmanager/alertmanager.yaml}:/etc/alertmanager/alertmanager.yaml:ro"
+      - alertmanager_data:/alertmanager
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:9093/-/ready",
         ]
       interval: 15s
       timeout: 5s
@@ -266,6 +298,7 @@ services:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
+      - alertmanager
       - loki
       - prometheus
       - jaeger
@@ -294,6 +327,7 @@ networks:
     driver: bridge
 
 volumes:
+  alertmanager_data:
   alloy_data:
   grafana_data:
   loki_data:
