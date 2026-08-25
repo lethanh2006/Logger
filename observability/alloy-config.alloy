@@ -15,7 +15,7 @@ discovery.relabel "system" {
 	// observability stack and infrastructure dependencies in this pipeline.
 	rule {
 		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-		regex         = "(alloy|cadvisor|grafana|jaeger|loki|node-exporter|otel-collector|payment-postgres|prometheus|rabbitmq|redis)"
+		regex         = "(alertmanager|alloy|cadvisor|grafana|jaeger|loki|node-exporter|otel-collector|payment-postgres|postgres-exporter|prometheus|rabbitmq|redis|redis-exporter)"
 		action        = "keep"
 	}
 
