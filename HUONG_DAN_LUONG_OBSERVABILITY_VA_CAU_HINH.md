@@ -1,6 +1,6 @@
 # Hướng dẫn luồng observability và cấu hình backend
 
-> Cập nhật: 2026-08-24
+> Cập nhật: 2026-08-25
 >
 > Phạm vi: `gateway`, `auth`, `user`, `mail`, `chat`, `todo`,
 > `workschedule`, `canteen`, `payment` và stack trong `logger/compose.yaml`.
@@ -13,6 +13,7 @@ Backend hiện tách observability thành các luồng độc lập theo đúng 
 | -------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
 | Distributed trace/latency        | OpenTelemetry SDK -> OTel Collector -> Jaeger                                        | Xem request đi qua service nào, span nào chậm hoặc lỗi       |
 | Host/container/dependency metric | node-exporter, cAdvisor, RabbitMQ/Redis/PostgreSQL exporter -> Prometheus -> Grafana | CPU, RAM, disk, container, queue, connection và health       |
+| Hạ tầng alert                    | Prometheus -> Alertmanager -> kênh tùy chọn                                          | Route cảnh báo sang Discord/Telegram/Slack; mặc định `noop`  |
 | Expected `4xx`                   | Một event tại Gateway; public entry riêng của Payment áp dụng cùng policy            | Dev xem ngay trong terminal; đồng thời tăng metric rejection |
 | Unexpected `5xx`                 | Một structured error tại service phát sinh + exception trên active span              | Tra bằng `errorId`, `trace_id` và `request_id`               |
 | Application stdout/stderr        | Docker logging driver `local`                                                        | Debug/nghiệp vụ ngắn hạn trên chính host chạy container      |
@@ -50,6 +51,8 @@ flowchart LR
     RP --> P
     PM --> P
     P --> GF[Grafana]
+    P --> AM[Alertmanager]
+    AM -. chỉ khi tự cấu hình .local.yaml .-> EXT[Discord / Telegram / Slack]
     J --> GF
 
     G -. expected 4xx, một event .-> DL[stdout/stderr + Docker local logs]
@@ -128,6 +131,7 @@ request/response body.
 | Jaeger            | `cr.jaegertracing.io/jaegertracing/jaeger:2.20.0` | Lưu/hiển thị trace local                       |
 | OTel Collector    | `otel/opentelemetry-collector:0.159.0`            | Nhận OTLP, batch/retry, xuất trace/metric      |
 | Prometheus        | `prom/prometheus:v3.12.0`                         | Scrape, lưu metric và đánh giá alert rule      |
+| Alertmanager      | `prom/alertmanager:v0.34.0`                       | Group/route alert; mặc định không gửi ra ngoài |
 | Grafana           | `grafana/grafana:13.2.0`                          | Dashboard/Explore cho Prometheus, Jaeger, Loki |
 | node-exporter     | `prom/node-exporter:v1.11.1`                      | Metric Linux host                              |
 | cAdvisor          | `ghcr.io/google/cadvisor:v0.57.0`                 | Metric Docker container                        |
@@ -145,7 +149,8 @@ bộ là `rabbitmq:15692`.
 - Docker Engine có Docker Compose plugin (`docker compose`). Linux là môi trường
   phù hợp nhất vì node-exporter/cAdvisor cần đọc host filesystem, cgroup và
   Docker state.
-- Node.js `>=20.19` và npm nếu chạy service trực tiếp trên host.
+- Node.js `>=20.19` và npm để chạy wrapper Compose, smoke test và các script của
+  repository. Đây vẫn là yêu cầu kể cả khi toàn bộ service chạy bằng Docker.
 - MongoDB đang chạy và truy cập được. Root Compose không dựng MongoDB; các
   service dùng Mongo phải có `MONGO_URL` đúng trong file `.env` của mình.
 - Các cổng host ở mục 8 chưa bị ứng dụng khác chiếm.
@@ -227,6 +232,17 @@ message broker chỉ bind `127.0.0.1`.
 ```dotenv
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=<mat-khau-admin-manh>
+
+ALERTMANAGER_HOST_PORT=9093
+ALERTMANAGER_RETENTION=120h
+ALERTMANAGER_CONFIG_FILE=./observability/alertmanager/alertmanager.yaml
+
+OBSERVABILITY_RESTART_POLICY=unless-stopped
+OBSERVABILITY_STOP_GRACE_PERIOD=15s
+OBSERVABILITY_CPU_LIMIT=1.0
+OBSERVABILITY_MEMORY_LIMIT=1g
+OBSERVABILITY_LOG_MAX_SIZE=10m
+OBSERVABILITY_LOG_MAX_FILE=3
 ```
 
 Wrapper kiểm tra trước `GRAFANA_ADMIN_PASSWORD` cùng ba biến
@@ -236,6 +252,17 @@ project backend.
 
 `GRAFANA_ADMIN_PASSWORD` không được để trống. Với volume Grafana đã khởi tạo,
 đổi biến môi trường không tự đổi mật khẩu cũ trong database Grafana.
+
+File Alertmanager mặc định dùng receiver `noop`, nghĩa là rule vẫn chuyển từ
+Prometheus sang Alertmanager nhưng không gọi dịch vụ ngoài. Chỉ đổi
+`ALERTMANAGER_CONFIG_FILE` sang một file `*.local.yaml` sau khi thực hiện mục 11. Các file này đã bị Git ignore vì có thể chứa webhook/token.
+
+Mọi container observability dùng Docker logging driver `local`, rotation mặc
+định `10m x 3`, giới hạn `1 CPU/1 GiB`, stop grace `15s` và restart
+`unless-stopped`. Có thể đổi bằng nhóm biến `OBSERVABILITY_*` trên. Nếu worktree
+local còn một `restart: "no"` khai báo trực tiếp trong service, giá trị trực tiếp
+đó sẽ ghi đè anchor; kiểm tra resolved config bằng
+`npm run observability:config` trước khi deploy.
 
 ### Biến observability của từng app
 
@@ -305,19 +332,28 @@ npm run observability:up
 ```
 
 Lệnh `observability:up` dùng đồng thời `backend/.env` và `logger/.env`, tạo
-network mặc định `nrapp-observability` rồi chờ container khởi động. `--wait` chỉ
-đảm bảo container đã chạy hoặc healthcheck đã khai báo đạt; một endpoint như
-Loki `/ready` vẫn có thể cần thêm vài giây trước khi trả `200`.
+network mặc định `nrapp-observability` rồi chờ container khởi động. Các image có
+probe tương thích dùng Docker healthcheck. Collector và Loki là image distroless
+không có shell/curl nên được kiểm readiness từ script host thay vì gắn một probe
+giả chỉ kiểm config.
+
+Chưa chạy smoke ở bước này nếu Redis/RabbitMQ/PostgreSQL chưa hoạt động, vì
+script cố ý yêu cầu **toàn bộ** Prometheus target đều `UP`. Nếu ba dependency đã
+chạy ở nơi khác và exporter kết nối được thì có thể chạy smoke ngay.
 
 ### Dựng observability cùng Redis/RabbitMQ/PostgreSQL
 
 ```bash
 npm run infra:up
+npm run observability:smoke
 ```
 
 Đây là lựa chọn phù hợp để chạy backend trực tiếp trên host. Script khởi động
 observability trước để external network tồn tại, sau đó dựng Redis, RabbitMQ và
-Payment PostgreSQL.
+Payment PostgreSQL. `observability:smoke` đợi các endpoint sẵn sàng, kiểm không
+có Prometheus target `DOWN`, tạo span `observability.smoke`, flush qua Collector
+và xác nhận đúng Trace ID xuất hiện trong Jaeger. Đây là acceptance bắt buộc sau
+mỗi setup mới hoặc thay cấu hình observability.
 
 ### Chạy cả 9 service trực tiếp trên host
 
@@ -363,6 +399,7 @@ Các port có thể đổi bằng biến tương ứng trong `.env`/`logger/.env
 | Grafana                  | <http://127.0.0.1:3001>          | Login bằng `GRAFANA_ADMIN_USER/PASSWORD`     |
 | Jaeger UI                | <http://127.0.0.1:16686>         | Tra waterfall/latency/error span             |
 | Prometheus UI            | <http://127.0.0.1:9090>          | Targets, query metric, alert rule            |
+| Alertmanager UI          | <http://127.0.0.1:9093>          | Alert đang active, silence và routing        |
 | OTel Collector OTLP gRPC | `127.0.0.1:4317`                 | App host nếu dùng gRPC                       |
 | OTel Collector OTLP HTTP | <http://127.0.0.1:4318>          | App host dùng OTLP HTTP/protobuf             |
 | OTel Collector health    | <http://127.0.0.1:13133>         | Health extension                             |
@@ -380,11 +417,12 @@ node-exporter (`9100`), cAdvisor (`8080`), redis_exporter (`9121`),
 postgres_exporter (`9187`), RabbitMQ metrics (`15692`) và Collector self/app
 metric (`8888`/`8889`) chỉ expose trong Docker network, không publish ra host.
 
-Grafana tự provision ba datasource:
+Grafana tự provision bốn datasource:
 
 - `Prometheus` (mặc định);
 - `Jaeger`;
 - `Loki`.
+- `Alertmanager` loại `prometheus`, chỉ đọc receiver/policy và quản lý silence.
 
 Dashboard được provision vào folder `Infrastructure`:
 
@@ -393,18 +431,24 @@ Dashboard được provision vào folder `Infrastructure`:
 
 ## 9. Kiểm tra sau khi setup
 
-Baseline ngày 2026-08-24 đã được kiểm tra: shared package đạt `18/18` test,
-Docker build đủ `9/9` app image, một smoke span đi qua Collector và xuất hiện
-trong Jaeger, Prometheus báo `12/12` target `UP`. Mỗi môi trường mới vẫn phải
-chạy lại các bước dưới đây; kết quả này không thay cho production acceptance.
+Baseline ngày 2026-08-25 đã được kiểm tra: shared package đạt `26/26` test;
+Gateway `23/23`; Auth `31/31`; User `15/15`; Mail `12/12`; Chat `18/18`; Todo
+`47/47`; Workschedule `26/26`; Payment `16/16`; Canteen `45/45`. Cả 9 service
+build thành công. Smoke tự động xác nhận span đi qua Collector vào Jaeger và
+Prometheus báo `13/13` target `UP`, gồm cả Alertmanager. Mỗi môi trường mới vẫn
+phải chạy lại acceptance; kết quả máy này không thay production load/HA test.
 
 ### Health và scrape target
 
 ```bash
+npm run observability:smoke
+
+# Các probe lẻ khi cần khoanh vùng:
 curl -fsS http://127.0.0.1:13133/
 curl -fsS http://127.0.0.1:3100/ready
 curl -fsS http://127.0.0.1:12345/-/ready
 curl -fsS http://127.0.0.1:9090/-/ready
+curl -fsS http://127.0.0.1:9093/-/ready
 curl -fsS http://127.0.0.1:3001/api/health
 ```
 
@@ -412,9 +456,10 @@ Nếu vừa dựng stack và Loki tạm trả `503`, chờ vài giây rồi ch�
 một lần readiness chưa đạt trong lúc khởi động là lỗi business API.
 
 Mở <http://127.0.0.1:9090/targets>. Khi chạy `npm run infra:up`, các job dự
-kiến gồm Prometheus, node-exporter, cAdvisor, Redis, PostgreSQL, RabbitMQ,
-Collector, application metrics, Jaeger, Loki, Alloy và Grafana. Target `DOWN`
-không đồng nghĩa API business đã lỗi; phải kiểm tra đúng exporter/dependency.
+kiến gồm Prometheus, Alertmanager, node-exporter, cAdvisor, Redis, PostgreSQL,
+RabbitMQ, Collector, application metrics, Jaeger, Loki, Alloy và Grafana. Target
+`DOWN` không đồng nghĩa API business đã lỗi; phải kiểm tra đúng
+exporter/dependency.
 
 PromQL kiểm tra nhanh:
 
@@ -499,29 +544,179 @@ Prometheus đánh giá rule mỗi 15 giây. Rule hiện gồm:
 - host CPU/RAM cao, filesystem còn dưới 10%;
 - Collector từ chối span hoặc export span thất bại;
 - RabbitMQ ready backlog trên 1.000 message;
+- Redis/PostgreSQL exporter không kết nối được dependency;
 - PostgreSQL connection trên 85%;
 - Redis memory trên 85% khi Redis có cấu hình max memory.
 
-Xem rule tại <http://127.0.0.1:9090/alerts>. Stack chưa cấu hình Alertmanager hay
-contact point production. Vì vậy rule có thể chuyển sang `FIRING` nhưng chưa gửi
-Discord/Telegram/email. Kênh notification và owner phải được chốt riêng trước
-production; business code không gọi webhook cảnh báo.
+Xem rule tại <http://127.0.0.1:9090/alerts> và alert đã chuyển tiếp tại
+<http://127.0.0.1:9093>. Prometheus đã nối Alertmanager, nhưng receiver mặc định
+là `noop`; rule có thể `FIRING` mà chưa gửi Discord/Telegram/Slack cho tới khi
+bạn chủ động cấu hình mục 11. Business code không bao giờ gọi webhook cảnh báo.
 
-## 11. Retention và giới hạn hiện tại
+## 11. Kết nối cảnh báo tới bên thứ ba
 
-| Dữ liệu           | Retention hiện tại                           | Giới hạn                                                                                              |
-| ----------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| App stdout/stderr | Docker `local`, `10m x 3 file` mỗi container | Rotation theo dung lượng; remove/recreate/down có thể làm lịch sử cũ không còn phù hợp để tra lâu dài |
-| Prometheus        | `15d` mặc định (`PROMETHEUS_RETENTION`)      | Named volume local, single host                                                                       |
-| Loki system log   | `168h` (7 ngày)                              | Filesystem, replication `1`, không auth                                                               |
-| Jaeger trace      | In-memory all-in-one                         | Restart/recreate Jaeger làm mất trace                                                                 |
-| Grafana config    | Named volume `grafana_data`                  | Local SQLite/volume, chưa HA                                                                          |
+Luồng duy nhất được phép:
 
-`docker compose down` không xóa named volume nếu không thêm `--volumes`. Không
-chạy `down --volumes` nếu chưa chủ động chấp nhận mất Prometheus/Loki/Grafana và
-dữ liệu dependency.
+```text
+Prometheus rule -> Alertmanager -> Discord / Telegram / Slack
+```
 
-## 12. Production hardening
+Không đặt webhook/token trong source của 9 service, không gọi provider trong
+request path và không commit secret. Alertmanager thực hiện group, repeat,
+silence và retry độc lập với business API.
+
+### 11.1. Quy trình chung
+
+1. Chọn đúng **một** provider đầu tiên để tránh alert trùng.
+2. Tạo webhook hoặc bot token theo một trong các mục 11.2-11.4.
+3. Copy file example thành file `*.local.yaml`; đuôi này đã bị Git ignore.
+4. Chỉ cho user vận hành và group của container Alertmanager đọc file, rồi thay
+   placeholder bằng secret thật.
+5. Trỏ `ALERTMANAGER_CONFIG_FILE` trong `logger/.env` tới file local.
+6. Validate config, recreate riêng Alertmanager rồi gửi một alert thử.
+
+Ví dụ với Discord:
+
+```bash
+cp logger/observability/alertmanager/discord.example.yaml \
+  logger/observability/alertmanager/discord.local.yaml
+sudo chown "$(id -u):65534" \
+  logger/observability/alertmanager/discord.local.yaml
+chmod 640 logger/observability/alertmanager/discord.local.yaml
+```
+
+Image Alertmanager đã pin chạy bằng UID/GID `65534`. Quyền trên giữ user hiện
+tại làm owner để sửa file, cho group của container quyền đọc, và không cho user
+khác đọc. `chmod 600` sẽ làm `amtool` lẫn container báo `permission denied`.
+Nếu host dùng rootless Docker/user namespace mapping, thay group `65534` bằng
+GID thực tế của container hoặc dùng secret manager của nền tảng deploy.
+
+Sửa `logger/.env`:
+
+```dotenv
+ALERTMANAGER_CONFIG_FILE=./observability/alertmanager/discord.local.yaml
+```
+
+Validate và áp dụng mà không restart 9 service:
+
+```bash
+docker run --rm --entrypoint /bin/amtool \
+  -v "$PWD/logger/observability/alertmanager/discord.local.yaml:/etc/alertmanager/alertmanager.yaml:ro" \
+  prom/alertmanager:v0.34.0 \
+  check-config /etc/alertmanager/alertmanager.yaml
+
+node scripts/observability-compose.mjs \
+  up -d --force-recreate alertmanager
+curl -fsS http://127.0.0.1:9093/-/ready
+```
+
+Gửi alert test sau khi đã sẵn sàng nhận notification thật:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:9093/api/v2/alerts \
+  -H 'Content-Type: application/json' \
+  --data '[{
+    "labels": {
+      "alertname": "ManualConnectionTest",
+      "severity": "warning",
+      "team": "platform"
+    },
+    "annotations": {
+      "summary": "Kiểm tra kết nối Alertmanager"
+    }
+  }]'
+```
+
+Mở <http://127.0.0.1:9093> để xác nhận alert active và kiểm tra kênh nhận. Sau
+khi test, silence alert trong UI hoặc đợi `resolve_timeout`. Không dùng payload
+test chứa dữ liệu người dùng/secret.
+
+### 11.2. Discord
+
+1. Vào Discord server -> **Server Settings -> Integrations -> Webhooks**.
+2. Chọn **New Webhook**, chọn channel cảnh báo và copy Webhook URL.
+3. Copy `discord.example.yaml` thành `discord.local.yaml` như trên.
+4. Thay `https://discord.com/api/webhooks/REPLACE_ME/REPLACE_ME` bằng URL thật.
+5. Validate, recreate Alertmanager và chạy alert test.
+
+Hướng dẫn chính thức: [Alertmanager notification integrations](https://prometheus.io/docs/alerting/latest/integrations/)
+và [Discord Webhooks](https://docs.discord.com/developers/platform/webhooks).
+Webhook URL là credential; nếu lộ phải xóa/recreate webhook tại Discord.
+
+### 11.3. Telegram
+
+1. Mở Telegram, tìm đúng bot đã xác minh **@BotFather**, chạy `/newbot` và lưu
+   bot token.
+2. Thêm bot vừa tạo vào group nhận alert.
+3. Gửi một tin nhắn không nhạy cảm trong group, rồi gọi `getUpdates` và lấy
+   `result[].message.chat.id`; group ID thường là số âm:
+
+   ```bash
+   read -rsp 'Telegram bot token: ' TELEGRAM_BOT_TOKEN; echo
+   curl -fsS \
+     "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
+   unset TELEGRAM_BOT_TOKEN
+   ```
+
+   Không dán response lên ticket/chat vì nó có thể chứa nội dung hoặc metadata
+   của group. Nếu `result` rỗng, gửi tin nhắn có mention bot rồi thử lại.
+
+4. Copy `telegram.example.yaml` thành `telegram.local.yaml`, thay
+   `REPLACE_WITH_TELEGRAM_BOT_TOKEN` và `chat_id` mẫu.
+5. Đổi `ALERTMANAGER_CONFIG_FILE`, validate, recreate và test.
+
+Hướng dẫn chính thức: [Telegram BotFather](https://core.telegram.org/bots/features#botfather),
+[Bot API/getUpdates](https://core.telegram.org/bots/api#getupdates) và
+[Alertmanager integrations](https://prometheus.io/docs/alerting/latest/integrations/).
+Không gửi bot token vào chat/ticket; revoke token bằng BotFather nếu bị lộ.
+
+### 11.4. Slack
+
+1. Vào [Slack Apps](https://api.slack.com/apps), tạo app cho workspace.
+2. Bật **Incoming Webhooks** và chọn **Add New Webhook to Workspace**.
+3. Chọn channel, authorize rồi copy URL `hooks.slack.com/...`.
+4. Copy `slack.example.yaml` thành `slack.local.yaml`, thay `api_url` và channel.
+5. Đổi `ALERTMANAGER_CONFIG_FILE`, validate, recreate và test.
+
+Hướng dẫn chính thức: [Slack Incoming Webhooks](https://api.slack.com/messaging/webhooks).
+Slack coi URL webhook là secret và có thể tự revoke URL bị public.
+
+### 11.5. Xem Alertmanager trong Grafana
+
+Grafana đã provision datasource `Alertmanager` trỏ tới
+`http://alertmanager:9093`. Vào **Connections -> Data sources -> Alertmanager**
+để kiểm tra kết nối, hoặc **Alerts & IRM -> Alerting** để xem alert/silence.
+
+Vì datasource dùng implementation `prometheus`, Grafana chỉ đọc contact
+point/policy; receiver phải chỉnh bằng file Alertmanager rồi recreate container.
+Nếu sau này chuyển rule thành Grafana-managed alert, có thể dùng Grafana Contact
+Points trực tiếp, nhưng không chạy đồng thời hai đường notification cho cùng rule
+vì sẽ gửi trùng.
+
+### 11.6. Email và provider khác
+
+Alertmanager còn hỗ trợ email, PagerDuty, Opsgenie, webhook và nhiều receiver
+khác. Chỉ thêm sau khi owner/on-call policy đã chốt. Với email phải có SMTP
+credential; với provider không được hỗ trợ trực tiếp dùng generic webhook ở
+Alertmanager, không viết HTTP notifier trong business code.
+
+## 12. Retention và giới hạn hiện tại
+
+| Dữ liệu                    | Retention hiện tại                           | Giới hạn                                                                                              |
+| -------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| App stdout/stderr          | Docker `local`, `10m x 3 file` mỗi container | Rotation theo dung lượng; remove/recreate/down có thể làm lịch sử cũ không còn phù hợp để tra lâu dài |
+| Log container quan sát     | Docker `local`, `10m x 3 file` mỗi container | Chỉ là log vận hành của chính stack, không thay Loki/Prometheus/Jaeger                                |
+| Prometheus                 | `15d` mặc định (`PROMETHEUS_RETENTION`)      | Named volume local, single host                                                                       |
+| Alertmanager alert/silence | `120h` (`ALERTMANAGER_RETENTION`)            | Named volume `alertmanager_data`, single host; không phải error history dài hạn                       |
+| Loki system log            | `168h` (7 ngày)                              | Filesystem, replication `1`, không auth                                                               |
+| Jaeger trace               | In-memory all-in-one                         | Restart/recreate Jaeger làm mất trace                                                                 |
+| Grafana config             | Named volume `grafana_data`                  | Local SQLite/volume, chưa HA                                                                          |
+
+`npm run observability:down` và `docker compose down` không xóa named volume nếu
+không thêm `--volumes`. Không chạy `down --volumes` nếu chưa chủ động chấp nhận
+mất Prometheus/Alertmanager/Loki/Grafana và dữ liệu dependency.
+
+## 13. Production hardening
 
 Cấu hình Compose hiện tại là local/single-host baseline, chưa phải production
 HA. Trước production cần thực hiện tối thiểu:
@@ -529,22 +724,26 @@ HA. Trước production cần thực hiện tối thiểu:
 1. Thay Jaeger in-memory bằng persistent backend. Jaeger v2 hỗ trợ
    Elasticsearch/OpenSearch/Cassandra; sau sizing, OpenSearch là lựa chọn phù
    hợp khi cần search production. Chốt TTL, disk, shard, backup và restore test.
-2. Chốt Prometheus/Loki/Jaeger retention theo traffic, disk budget và thời gian
-   điều tra; tạo disk/inode alert trước khi tăng retention.
-3. Đặt Jaeger, Prometheus, Grafana, Loki, Alloy và OTLP ingestion sau private
-   network/VPN hoặc reverse proxy TLS. Hiện chỉ Grafana có login; không expose
-   trực tiếp các port local ra Internet.
+2. Chốt Prometheus/Alertmanager/Loki/Jaeger retention theo traffic, disk budget
+   và thời gian điều tra; tạo disk/inode alert trước khi tăng retention.
+3. Đặt Jaeger, Prometheus, Alertmanager, Grafana, Loki, Alloy và OTLP ingestion
+   sau private network/VPN hoặc reverse proxy TLS. Hiện chỉ Grafana có login;
+   không expose trực tiếp các port local ra Internet.
 4. Đưa secret vào secret manager/Compose secrets/Kubernetes Secrets; không để
    credential trong Git, command history, dashboard label hoặc trace attribute.
 5. Giới hạn người được đọc Docker socket. Alloy mount Docker socket read-only
    nhưng vẫn đọc được nhiều metadata; cAdvisor hiện cần `privileged` và host
    mounts.
-6. Đặt resource limit, restart policy, healthcheck, backup và runbook cho stack
-   theo nền tảng deploy thực tế.
+6. Baseline đã có resource limit, restart policy, log rotation và healthcheck
+   cho image hỗ trợ. Production phải sizing lại theo tải, thêm external probe
+   cho image distroless, backup/restore test và runbook theo nền tảng deploy.
 7. Cấu hình `OTEL_SERVICE_VERSION` bằng Git SHA/release thật để phân biệt
    regression giữa các bản deploy.
 8. Giữ telemetry fail-open: Collector/Jaeger/Prometheus hỏng không được làm API
    business thất bại hoặc chờ vô hạn.
+9. Chọn owner/on-call, severity và repeat interval trước khi bật receiver ngoài.
+   Webhook/bot token phải nằm trong secret manager hoặc secret file mount
+   read-only; không dùng chung một webhook giữa staging và production.
 
 ### Sampling production
 
@@ -566,7 +765,7 @@ component này rồi mới thêm YAML. Không tự viết sampling trong từng 
 Không dùng `request_id`, `trace_id`, `errorId`, user ID, email hoặc raw URL làm
 Prometheus label vì cardinality cao.
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Compose báo thiếu biến
 
@@ -628,6 +827,24 @@ node scripts/observability-compose.mjs ps
 - node-exporter/cAdvisor trên Docker Desktop đo Linux VM của Docker, không phản
   ánh hoàn toàn host Windows/macOS; host mount/cgroup cũng có thể khác Linux.
 
+### Alert `FIRING` nhưng không có tin nhắn bên thứ ba
+
+1. Mở <http://127.0.0.1:9090/alertmanagers> và xác nhận Alertmanager endpoint đang
+   active, sau đó mở <http://127.0.0.1:9093> để xem alert đã tới hay chưa.
+2. Kiểm tra `ALERTMANAGER_CONFIG_FILE` không còn trỏ tới file mặc định `noop`.
+3. Validate chính file `*.local.yaml` theo lệnh mục 11.1 và force-recreate
+   Alertmanager sau mỗi lần đổi receiver.
+4. Xem lỗi HTTP `401/403/404/429`, DNS hoặc TLS trong log:
+
+```bash
+node scripts/observability-compose.mjs logs --tail=200 alertmanager
+```
+
+Nếu alert đã vào Alertmanager nhưng receiver không gửi được, sửa credential,
+quyền channel/chat hoặc rate limit của provider; không thêm fallback webhook vào
+business service. Khi test lại, dùng alert name mới để tránh group interval làm
+notification trông như bị mất.
+
 ### Có `5xx` nhưng không thấy `errorId`
 
 - Xác nhận đó thật sự là unexpected error; expected `4xx` không có `errorId`.
@@ -675,7 +892,7 @@ Script kiểm tra đủ 9 host port trước khi spawn app. Dừng process cũ h
 `*_HOST_PORT` trong `backend/.env`; không chạy host app và app container đồng
 thời.
 
-## 14. Dừng và rollback
+## 15. Dừng và rollback
 
 ### Dừng nhưng giữ dữ liệu
 
@@ -711,14 +928,16 @@ không xóa network giữa lúc các app đang dùng nó.
 - Telemetry rollback không đồng nghĩa rollback Payment database/outbox schema.
   Migration tài chính phải theo release plan và backup riêng; không tự động
   revert khi chỉ muốn tắt tracing.
-- Giữ named volume trong rollback window. Chỉ dùng `down --volumes` khi đã xác
+- Giữ các named volume `prometheus_data`, `alertmanager_data`, `loki_data` và
+  `grafana_data` trong rollback window. Chỉ dùng `down --volumes` khi đã xác
   nhận chính xác project/volume và chấp nhận mất dữ liệu local.
 
-## 15. Link cài đặt và tài liệu chính thức
+## 16. Link cài đặt và tài liệu chính thức
 
-Trong repository này, Docker Compose tự pull các image đã pin nên chỉ Docker là
-bắt buộc; Node.js chỉ bắt buộc nếu chạy app trên host. Các link còn lại dùng khi
-cần xem cách cài độc lập hoặc chuyển sang production platform.
+Trong repository này, Docker Compose tự pull các image đã pin. Docker, Node.js
+và npm đều bắt buộc cho workflow wrapper/smoke được tài liệu hóa; không cần cài
+riêng Jaeger/Prometheus/Alertmanager trên host. Các link còn lại dùng khi cần xem
+cách cài độc lập hoặc chuyển sang production platform.
 
 | Công cụ                                     | Link chính thức                                                                                                                                                                                                  |
 | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -728,7 +947,12 @@ cần xem cách cài độc lập hoặc chuyển sang production platform.
 | OpenTelemetry Collector                     | [Install Collector](https://opentelemetry.io/docs/collector/install/) và [chạy bằng Docker](https://opentelemetry.io/docs/collector/install/docker/)                                                             |
 | Jaeger v2                                   | [Jaeger 2.20 getting started](https://www.jaegertracing.io/docs/2.20/getting-started/), [download](https://www.jaegertracing.io/download/) và [storage backend](https://www.jaegertracing.io/docs/2.20/storage/) |
 | Prometheus                                  | [Prometheus installation](https://prometheus.io/docs/prometheus/latest/installation/)                                                                                                                            |
-| Grafana                                     | [Run Grafana bằng Docker](https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/)                                                                                                            |
+| Alertmanager                                | [Download](https://prometheus.io/download/), [configuration](https://prometheus.io/docs/alerting/latest/configuration/) và [notification integrations](https://prometheus.io/docs/alerting/latest/integrations/) |
+| Grafana                                     | [Run Grafana bằng Docker](https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/) và [Alertmanager datasource](https://grafana.com/docs/grafana/latest/datasources/alertmanager/)            |
+| Discord                                     | [Discord Webhooks](https://docs.discord.com/developers/platform/webhooks)                                                                                                                                        |
+| Telegram                                    | [BotFather](https://core.telegram.org/bots/features#botfather) và [Bot API/getUpdates](https://core.telegram.org/bots/api#getupdates)                                                                            |
+| Slack                                       | [Slack Incoming Webhooks](https://api.slack.com/messaging/webhooks)                                                                                                                                              |
+| Email qua Alertmanager                      | [Alertmanager email_config](https://prometheus.io/docs/alerting/latest/configuration/#email_config)                                                                                                              |
 | node-exporter                               | [Prometheus node_exporter](https://github.com/prometheus/node_exporter) và [host metric guide](https://prometheus.io/docs/guides/node-exporter/)                                                                 |
 | cAdvisor                                    | [cAdvisor repository/quick start](https://github.com/google/cadvisor)                                                                                                                                            |
 | RabbitMQ Prometheus plugin                  | [RabbitMQ monitoring với Prometheus/Grafana](https://www.rabbitmq.com/docs/4.2/prometheus)                                                                                                                       |
