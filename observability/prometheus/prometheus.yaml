@@ -28,6 +28,50 @@ scrape_configs:
     static_configs:
       - targets: ["cadvisor:8080"]
 
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets: ["blackbox-exporter:9115"]
+
+  - job_name: backend-readiness
+    metrics_path: /probe
+    params:
+      module: [http_ready]
+    static_configs:
+      - targets: ["http://gateway:3000/health"]
+        labels:
+          service: gateway
+      - targets: ["http://auth:4000/health"]
+        labels:
+          service: auth
+      - targets: ["http://user:5000/health/ready"]
+        labels:
+          service: user
+      - targets: ["http://mail:5001/health"]
+        labels:
+          service: mail
+      - targets: ["http://chat:5002/health/ready"]
+        labels:
+          service: chat
+      - targets: ["http://todo:5003/health/ready"]
+        labels:
+          service: todo
+      - targets: ["http://workschedule:5004/health/ready"]
+        labels:
+          service: workschedule
+      - targets: ["http://canteen:5005/health"]
+        labels:
+          service: canteen
+      - targets: ["http://payment:5006/health/ready"]
+        labels:
+          service: payment
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
   - job_name: redis
     static_configs:
       - targets: ["redis-exporter:9121"]

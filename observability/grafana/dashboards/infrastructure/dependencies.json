@@ -112,7 +112,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "redis_memory_max_bytes > 0",
+          "expr": "redis_memory_max_bytes",
           "legendFormat": "configured max",
           "range": true,
           "refId": "B"

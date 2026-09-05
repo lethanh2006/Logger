@@ -72,7 +72,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "count(up == 0)",
+          "expr": "sum(up == bool 0)",
           "instant": true,
           "legendFormat": "targets down",
           "range": false,
@@ -755,14 +755,14 @@
         },
         {
           "editorMode": "code",
-          "expr": "sum(rate(otelcol_receiver_refused_spans[5m]))",
+          "expr": "sum(rate(otelcol_receiver_refused_spans[5m])) or vector(0)",
           "legendFormat": "refused",
           "range": true,
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "sum(rate(otelcol_exporter_send_failed_spans[5m]))",
+          "expr": "sum(rate(otelcol_exporter_send_failed_spans[5m])) or vector(0)",
           "legendFormat": "export failed",
           "range": true,
           "refId": "C"

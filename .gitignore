@@ -45,3 +45,5 @@ next-env.d.ts
 
 # Alertmanager receiver files may contain webhook URLs or bot tokens.
 /observability/alertmanager/*.local.yaml
+/observability/alertmanager/secrets/*
+!/observability/alertmanager/secrets/README.md

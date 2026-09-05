@@ -15,3 +15,8 @@ datasources:
     jsonData:
       timeout: 60
       maxLines: 2000
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"([a-f0-9]{32})"'
+          datasourceUid: jaeger
+          url: '$${__value.raw}'

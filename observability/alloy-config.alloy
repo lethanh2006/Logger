@@ -11,11 +11,41 @@ discovery.docker "system" {
 discovery.relabel "system" {
 	targets = discovery.docker.system.targets
 
-	// Application access/error logs no longer belong to Loki. Keep only the
-	// observability stack and infrastructure dependencies in this pipeline.
+	// Keep application logs out of this system pipeline; the dedicated
+	// application pipeline below sends them with log_scope="application".
 	rule {
 		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
 		regex         = "(alertmanager|alloy|cadvisor|grafana|jaeger|loki|node-exporter|otel-collector|payment-postgres|postgres-exporter|prometheus|rabbitmq|redis|redis-exporter)"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+		target_label  = "compose_project"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		replacement   = "$1"
+		target_label  = "container"
+	}
+}
+
+discovery.relabel "application" {
+	targets = discovery.docker.system.targets
+
+	// Keep application logs in a separate Loki scope. Only low-cardinality
+	// Docker metadata becomes an indexed label; request/trace/error IDs remain
+	// inside the sanitized JSON body and are parsed at query time.
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		regex         = "(gateway|auth|user|canteen|chat|todo|workschedule|payment|mail)"
 		action        = "keep"
 	}
 
@@ -49,6 +79,24 @@ loki.process "system" {
 	stage.static_labels {
 		values = {
 			log_scope = "system",
+		}
+	}
+
+	forward_to = [loki.write.local.receiver]
+}
+
+loki.source.docker "application" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.application.output
+	forward_to = [loki.process.application.receiver]
+}
+
+loki.process "application" {
+	stage.docker { }
+
+	stage.static_labels {
+		values = {
+			log_scope = "application",
 		}
 	}
 

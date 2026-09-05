@@ -1,0 +1,176 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(increase(container_oom_events_total{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"}[$__range])) or vector(0)", "instant": true, "legendFormat": "OOM events", "range": false, "refId": "A" }
+      ],
+      "title": "OOM events in range",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 3 }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 9, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "changes((max by (container_label_com_docker_compose_service) (container_start_time_seconds{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"}))[$__range:])", "instant": true, "legendFormat": "{{container_label_com_docker_compose_service}}", "range": false, "refId": "A" }
+      ],
+      "title": "Restart/recreate count in range",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 9, "x": 15, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "time() - max by (container_label_com_docker_compose_service) (container_start_time_seconds{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"})", "instant": true, "legendFormat": "{{container_label_com_docker_compose_service}}", "range": false, "refId": "A" }
+      ],
+      "title": "Current container uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (container_label_com_docker_compose_service) (rate(container_cpu_cfs_throttled_seconds_total{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"}[$__rate_interval])) / clamp_min(sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"}[$__rate_interval])), 0.001)",
+          "legendFormat": "{{container_label_com_docker_compose_service}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CPU throttled time / CPU usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (container_label_com_docker_compose_service) (rate(container_network_receive_bytes_total{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"}[$__rate_interval]))", "legendFormat": "{{container_label_com_docker_compose_service}} receive", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum by (container_label_com_docker_compose_service) (rate(container_network_transmit_bytes_total{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"}[$__rate_interval]))", "legendFormat": "{{container_label_com_docker_compose_service}} transmit", "range": true, "refId": "B" }
+      ],
+      "title": "Container network throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"}[$__rate_interval]))", "legendFormat": "{{container_label_com_docker_compose_service}}", "range": true, "refId": "A" }
+      ],
+      "title": "Container CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "id": 7,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_project=~\"$project\",container_label_com_docker_compose_service!~\"\"})", "legendFormat": "{{container_label_com_docker_compose_service}}", "range": true, "refId": "A" }
+      ],
+      "title": "Container working-set memory",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["containers", "docker", "infrastructure", "prometheus"],
+  "templating": {
+    "list": [
+      {
+        "allValue": "nrapp-.*",
+        "current": { "text": "All", "value": "$__all" },
+        "hide": 0,
+        "includeAll": true,
+        "label": "Compose project",
+        "multi": true,
+        "name": "project",
+        "options": [],
+        "query": "nrapp-backend,nrapp-observability",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Container health",
+  "uid": "nrapp-container-health",
+  "version": 1
+}

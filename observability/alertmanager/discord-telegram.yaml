@@ -1,0 +1,24 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: discord-and-telegram
+  group_by: [alertname, severity, team, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: discord-and-telegram
+    discord_configs:
+      - webhook_url_file: /run/secrets/alertmanager/discord_webhook_url
+        send_resolved: true
+    telegram_configs:
+      - bot_token_file: /run/secrets/alertmanager/telegram_bot_token
+        chat_id_file: /run/secrets/alertmanager/telegram_chat_id
+        send_resolved: true
+
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname, service, instance]

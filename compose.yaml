@@ -81,6 +81,7 @@ services:
       - otel-collector
       - node-exporter
       - cadvisor
+      - blackbox-exporter
       - redis-exporter
       - postgres-exporter
     networks:
@@ -113,6 +114,7 @@ services:
       - "127.0.0.1:${ALERTMANAGER_HOST_PORT:-9093}:9093"
     volumes:
       - "${ALERTMANAGER_CONFIG_FILE:-./observability/alertmanager/alertmanager.yaml}:/etc/alertmanager/alertmanager.yaml:ro"
+      - ./observability/alertmanager/secrets:/run/secrets/alertmanager:ro
       - alertmanager_data:/alertmanager
     networks:
       - observability
@@ -197,6 +199,26 @@ services:
       retries: 3
       start_period: 10s
 
+  blackbox-exporter:
+    <<: *observability-defaults
+    image: prom/blackbox-exporter:v0.28.0
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yaml
+    expose:
+      - "9115"
+    volumes:
+      - ./observability/blackbox/blackbox.yaml:/etc/blackbox_exporter/config.yaml:ro
+    networks:
+      - observability
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9115/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
   redis-exporter:
     <<: *observability-defaults
     image: oliver006/redis_exporter:v1.89.0-alpine
@@ -236,7 +258,6 @@ services:
     <<: *observability-defaults
     image: grafana/loki:3.7.0
     command: ["-config.file=/etc/loki/config.yaml"]
-    restart: "no"
     ports:
       - "127.0.0.1:${LOKI_HOST_PORT:-3100}:3100"
     volumes:
@@ -255,7 +276,6 @@ services:
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
       - /etc/alloy/config.alloy
-    restart: "no"
     ports:
       - "127.0.0.1:${ALLOY_HOST_PORT:-12345}:12345"
     volumes:
@@ -285,7 +305,6 @@ services:
   grafana:
     <<: *observability-defaults
     image: grafana/grafana:13.2.0
-    restart: "no"
     ports:
       - "127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"
     environment:

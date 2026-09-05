@@ -32,6 +32,14 @@ datasources:
     jsonData:
       nodeGraph:
         enabled: true
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -1m
+        spanEndTimeShift: 1m
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: true
+        query: '{log_scope="application"} | json | trace_id="$${__trace.traceId}"'
 
   - name: Alertmanager
     uid: alertmanager
